@@ -4,30 +4,50 @@ import feedparser
 import re
 import urllib.parse
 import requests
-import telebot # NAYA: Telegram library
-from flask import Flask        # NAYA
-from threading import Thread   # NAYA
+import telebot
+from flask import Flask
+from threading import Thread
 from googleapiclient.discovery import build
 from groq import Groq
+
 # ==========================================
 # ⚙️ CONFIGURATION 
 # ==========================================
 BLOG_ID = '54301321397959393' 
 GROQ_API_KEY = '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' 
 TELEGRAM_BOT_TOKEN = '8643823233:AAF_3hqNR_f9nwljCh-BxcV7LdYcq2-73vE'
+# (Note: Bhai public repo par in keys ko daalne se bachna chahiye, par abhi testing ke liye theek hai)
 # ==========================================
 
 os.environ["GROQ_API_KEY"] = GROQ_API_KEY
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 
+# ==========================================
+# 🌐 FAKE WEB SERVER (Keep-Alive & Render Port Fix)
+# ==========================================
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "🚀 TrendAura Bot is ALIVE and RUNNING 24/7!"
+
+def run_server():
+    # NAYA JADOO: Render ka dynamic port uthayega
+    port = int(os.environ.get('PORT', 8080))
+    app.run(host='0.0.0.0', port=port)
+
+def keep_alive():
+    t = Thread(target=run_server)
+    t.start()
+
+# ==========================================
+# 🧠 MAIN ENGINE FUNCTIONS
+# ==========================================
 def get_latest_news():
     print("\n🔥 Reddit Trends scan kar raha hoon aur Memory check kar raha hoon...")
-    
-    # Ek text file jisme hum purani posts ka record rakhenge
     history_file = "posted_history.txt"
-    
-    # Purani posts ki list padh rahe hain (agar file exist karti hai)
     posted_links = []
+    
     if os.path.exists(history_file):
         with open(history_file, "r", encoding="utf-8") as f:
             posted_links = f.read().splitlines()
@@ -41,9 +61,7 @@ def get_latest_news():
         response = requests.get(url, headers=headers, timeout=10)
         feed = feedparser.parse(response.content)
         
-        # Ab hum blindly [0] nahi uthayenge, balki list mein ek-ek karke check karenge!
         for entry in feed.entries:
-            # Agar ye link humari history mein NAHI hai, toh isko pakad lo
             if entry.link not in posted_links:
                 news_data = {
                     "title": entry.title, 
@@ -51,14 +69,12 @@ def get_latest_news():
                     "summary": f"This is a highly discussed viral topic on Reddit: {entry.title}. Write a comprehensive, opinionated, and viral deep-dive blog post about it."
                 }
                 
-                # Is naye link ko history file mein save kar lo taaki agli baar repeat na ho
                 with open(history_file, "a", encoding="utf-8") as f:
                     f.write(entry.link + "\n")
                     
                 print(f"🚀 Fresh Reddit Trend Mil Gaya: '{news_data['title']}'")
                 return news_data
         
-        # Agar loop khatam ho gaya aur saari posts pehle hi daali ja chuki hain:
         raise Exception("Boss, Reddit ki saari top posts tu already chhap chuka hai! Thode ghante baad naya maal aane par try karna.")
             
     except Exception as e:
@@ -99,7 +115,6 @@ def generate_dynamic_article(news_data):
     </CONTENT>
     """
     
-    # Temperature 0.3 kiya hai taaki wo strict rules follow kare aur format na tode
     response = client.chat.completions.create(
         messages=[{"role": "user", "content": prompt}],
         model="llama-3.1-8b-instant", 
@@ -124,17 +139,24 @@ def publish_to_blogger(title, content, category_label):
     try:
         request = service.posts().insert(blogId=BLOG_ID, body=post_data, isDraft=False)
         result = request.execute()
-        print(f"✅ BOOM! Article Live: {result['url']}")
+        return result['url']
     except Exception as e:
-        print(f"❌ Error aagaya: {e}")
+        raise Exception(f"Blogger Publish Error: {e}")
 
-if __name__ == '__main__':
-    print("🚀 TrendAura Pro Auto-Bot Started!\n" + "="*40)
-    
-    news = get_latest_news()
-    ai_raw_output = generate_dynamic_article(news)
+# ==========================================
+# 🤖 TELEGRAM BOT EXECUTION
+# ==========================================
+@bot.message_handler(commands=['post'])
+def send_post_from_phone(message):
+    bot.reply_to(message, "🚀 Boss ka order mil gaya! Latest news dhoondh kar post bana raha hoon. 1-2 minute wait karo...")
     
     try:
+        news = get_latest_news()
+        bot.send_message(message.chat.id, f"📰 Khabar mil gayi: '{news['title']}'. AI likhna shuru kar raha hai...")
+        
+        ai_raw_output = generate_dynamic_article(news)
+        
+        # Tags Extract
         label_match = re.search(r'<(?:LABEL|TAG)>(.*?)</(?:LABEL|TAG)>', ai_raw_output, re.IGNORECASE | re.DOTALL)
         title_match = re.search(r'<TITLE>(.*?)</TITLE>', ai_raw_output, re.IGNORECASE | re.DOTALL)
         image_match = re.search(r'<(?:IMAGE_PROMPT|IMAGE)>(.*?)</(?:IMAGE_PROMPT|IMAGE)>', ai_raw_output, re.IGNORECASE | re.DOTALL)
@@ -146,103 +168,46 @@ if __name__ == '__main__':
         
         if content_match:
             content_html = content_match.group(1).strip()
-            # Safety cleanup: Remove stray markdown if AI still disobeys
-            content_html = content_html.replace('**', '')
-        else:
-            print("❌ AI ne <CONTENT> tag nahi diya, skip kar raha hoon.")
-            exit()
-
-        # 🎨 AI IMAGE FIX (Blogger Native Format)
-        clean_prompt = re.sub(r'[^a-zA-Z0-9\s]', '', raw_prompt).strip()
-        safe_prompt = clean_prompt.replace(' ', '%20')
-        
-        # .jpg lagana zaroori hai Blogger ke liye
-        image_url = f"https://image.pollinations.ai/prompt/{safe_prompt}.jpg"
-        print(f"🖼️ Generated Image URL: {image_url}") 
-        
-        # Ekdum original Blogger format jo tune diya hai
-        thumbnail_html = f'''
-        <div class="separator" style="clear: both;">
-            <a href="{image_url}" style="display: block; padding: 1em 0; text-align: center;">
-                <img alt="{dynamic_title}" border="0" width="600" data-original-height="630" data-original-width="1200" src="{image_url}" style="border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1);"/>
-            </a>
-        </div>
-        '''
-        
-        final_content = thumbnail_html + content_html
-        
-        publish_to_blogger(dynamic_title, final_content, dynamic_label)
-            
-    except Exception as e:
-        print("❌ System Error:", e)
-        
-
-    
-# NAYA: Telegram Command Handler
-@bot.message_handler(commands=['post'])
-def send_post_from_phone(message):
-    bot.reply_to(message, "🚀 Boss ka order mil gaya! Latest news dhoondh kar post bana raha hoon. 1-2 minute wait karo...")
-    
-    try:
-        # Pura process yahan chalega
-        news = get_latest_news()
-        bot.send_message(message.chat.id, f"📰 Khabar mil gayi: '{news['title']}'. AI likhna shuru kar raha hai...")
-        
-        ai_raw_output = generate_dynamic_article(news)
-        
-        # Tags nikalne wala tera logic
-        label_match = re.search(r'<(?:LABEL|TAG)>(.*?)</(?:LABEL|TAG)>', ai_raw_output, re.IGNORECASE | re.DOTALL)
-        title_match = re.search(r'<TITLE>(.*?)</TITLE>', ai_raw_output, re.IGNORECASE | re.DOTALL)
-        content_match = re.search(r'<CONTENT>(.*?)</CONTENT>', ai_raw_output, re.IGNORECASE | re.DOTALL)
-        
-        dynamic_label = label_match.group(1).strip() if label_match else "Trending News"
-        dynamic_title = title_match.group(1).strip() if title_match else f"🔥 TrendAlert: {news['title']}"
-        
-        if content_match:
-            content_html = content_match.group(1).strip()
             content_html = content_html.replace('**', '')
             
-            publish_to_blogger(dynamic_title, content_html, dynamic_label)
+            # 🎨 AI IMAGE GENERATION
+            bot.send_message(message.chat.id, "🖼️ Image banayi jaa rahi hai...")
+            clean_prompt = re.sub(r'[^a-zA-Z0-9\s]', '', raw_prompt).strip()
+            safe_prompt = clean_prompt.replace(' ', '%20')
+            image_url = f"https://image.pollinations.ai/prompt/{safe_prompt}.jpg"
             
-            # Jab kaam ho jaye, toh phone par success message bhej do!
-            bot.send_message(message.chat.id, f"✅ BOOM! Post Live Ho Gayi Boss!\n\nTitle: {dynamic_title}\nJaa kar blog check kar lo.")
+            # Pre-ping image to cache it on server
+            try:
+                requests.get(image_url, timeout=10)
+            except:
+                pass
+            
+            thumbnail_html = f'''
+            <div class="separator" style="clear: both;">
+                <a href="{image_url}" style="display: block; padding: 1em 0; text-align: center;">
+                    <img alt="{dynamic_title}" border="0" width="600" data-original-height="630" data-original-width="1200" src="{image_url}" style="border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1);"/>
+                </a>
+            </div>
+            '''
+            
+            final_content = thumbnail_html + content_html
+            
+            # Publish!
+            post_url = publish_to_blogger(dynamic_title, final_content, dynamic_label)
+            bot.send_message(message.chat.id, f"✅ BOOM! Post Live Ho Gayi Boss!\n\nTitle: {dynamic_title}\nLink: {post_url}")
+            
         else:
             bot.send_message(message.chat.id, "❌ Error: AI ne format theek se nahi diya.")
             
     except Exception as e:
         bot.send_message(message.chat.id, f"❌ Bhai ek error aagaya: {e}")
 
-# Script ko lagatar chalate rehne ke liye taaki wo Telegram messages sunta rahe
-if __name__ == '__main__':
-    print("🤖 Telegram Bot is ONLINE! Apne phone se '/post' message bhejo...")
-    bot.infinity_polling()
-
-    app = Flask(__name__)
-
-@app.route('/')
-def home():
-    return "🚀 TrendAura Bot is ALIVE and RUNNING 24/7!"
-
-def run_server():
-    app.run(host='0.0.0.0', port=8080)
-
-def keep_alive():
-    t = Thread(target=run_server)
-    t.start()
-
 # ==========================================
-# 🤖 TELEGRAM BOT EXECUTION
+# 🚀 MAIN STARTER
 # ==========================================
-bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
-
-@bot.message_handler(commands=['post'])
-def send_post_from_phone(message):
-    # (Tera Telegram wala purana code yahan aayega)
-    pass
-
 if __name__ == '__main__':
-    print("🌐 Starting Fake Web Server for 24/7 Uptime...")
-    keep_alive() # Ye server ko zinda rakhega
+    print("🌐 Starting Fake Web Server for 24/7 Uptime (Port Fix Applied)...")
+    keep_alive() 
     
     print("🤖 Telegram Bot is ONLINE! Apne phone se '/post' message bhejo...")
     bot.infinity_polling()
