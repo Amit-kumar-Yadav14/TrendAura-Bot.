@@ -3,7 +3,7 @@
 ![Python](https://img.shields.io/badge/Python-3.11-blue.svg)
 ![AI Model](https://img.shields.io/badge/AI-LLaMA_3.1_(8B)-orange.svg)
 ![Deployment](https://img.shields.io/badge/Deployed_on-Render-success.svg)
-![Status](https://img.shields.io/badge/Status-24%x2F7_Active-brightgreen.svg)
+![Status]([https://img.shields.io/badge/Status-24%x2F7_Active-brightgreen.svg](https://voice-gta.onrender.com/))
 
 ## 📌 Project Overview
 TrendAura AI is a fully autonomous, serverless content generation and publishing engine. It eliminates manual blogging workflows by continuously monitoring viral internet trends, synthesizing the data using a Large Language Model (LLM), generating SEO-optimized HTML articles with AI-generated thumbnails, and publishing them directly to Google Blogger. 
